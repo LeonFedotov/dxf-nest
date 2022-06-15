@@ -1,40 +1,32 @@
 const fs = require('fs')
 const { Helper } = require('dxf')
-const { Group, Polygon } = require('pts')
+const { Group, Polygon, Geom, Pt } = require('pts')
 const helper = new Helper(fs.readFileSync('./1001.dxf', 'utf-8'))
-const boxes = helper.parsed.entities.map(({vertices}) =>
-	Polygon.toRects([
-		Group.fromArray(
-			vertices.map(({x, y}) => [x,y])
-		)
-	])
-	.pop()
-	.reduce((a, b) => [Math.abs(a[0]-b[0]), Math.abs(a[1]-b[1])])
-)
 
-helper.parsed.entities = helper.parsed.entities.map(({vertices, ...shape}, index) => {
-	const [w, h] = boxes
-		.slice(1, index)
-		.reduce(([w, h], [nw, nh]) => [w+nw+10, h+nh+10], boxes[0])
+const dist = ({x1, y1, x2, y2}) => Math.sqrt((Math.pow(x1-x2,2))+(Math.pow(y1-y2,2)))
+const SCALE = 3.7795
+const OFFSET = 0
 
-	return {
-		...shape,
-		vertices: vertices.map(({x, y, ...r}) => ({x: x+w, y: y+h, ...r}))
-	}
-})
-helper.parsed.entities.push({
-  type: 'POLYLINE',
-  layer: '0',
-  colorNumber: 1,
-  closed: true,
-  polygonMesh: false,
-  polyfaceMesh: false,
-  vertices: [
-  	{x: 0, y: 0},
-  	{x: 0, y: -400},
-  	{x: -400, y: -400},
-  	{x: -400, y: 0},
-  ]
-})
+const getSize = (shape) => shape.boundingBox().moveTo(0, 0).q1
+const packInto = (shapes = [], sheet = [400, 400]) => {
+  const lastPos = { x: 0, y: 0 }
+  const rects = []
+  shapes
+    .map(({vertices}) => Group.fromArray(vertices.map(({x, y}) => [x,y])))
+    .forEach((shape, index) => {
+      const [fx, fy] = shape.$zip().map( p => Math.abs(Math.min(...p)))
+      shape.moveBy(lastPos.x + fx, lastPos.y + fy)
+      const [width, height] = getSize(shape)
+      lastPos.x += width + OFFSET
+      lastPos.y += height + OFFSET
+      shapes[index].vertices.forEach( (vertex, index) => {
+        vertex.x = shape[index].x * SCALE
+        vertex.y = shape[index].y * SCALE
+      })
+    })
 
+  return shapes
+}
+
+helper.parsed.entities = packInto(helper.parsed.entities.slice(0, 6))
 fs.writeFileSync('./test.svg', helper.toSVG(), 'utf-8')
